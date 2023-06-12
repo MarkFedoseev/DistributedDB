@@ -28,14 +28,3 @@ class Database:
             return f"Record {key} deleted."
         else:
             return "Error: Key not found."
-
-
-if __name__ == '__main__':
-    # Usage
-    db = Database()
-    db.create('name', 'John Doe')
-    print(db.read('name'))
-    db.update('name', 'Jane Doe')
-    print(db.read('name'))
-    db.delete('name')
-    print(db.read('name'))  # should print 'Error: Key not found.'

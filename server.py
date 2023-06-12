@@ -93,7 +93,7 @@ class MyHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"Error:": record.split('Error:')[1]}).encode())
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    "This is an HTTPServer that supports thread-based concurrency."
+    ""
 
 if __name__ == '__main__':
     server = ThreadedHTTPServer(('localhost', 8080), MyHandler)
