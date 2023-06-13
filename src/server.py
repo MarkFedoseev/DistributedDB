@@ -146,16 +146,13 @@ def replicate(server, serversCluster):
                 print(f"Replaying {log_data['operation']} with data {log_data['data']}")
                 serversCluster.resetCurrentServer()
 
-                currentServer = serversCluster.getNextServer()
-                print(f'Sending to {currentServer}')
-
                 for i in range(serversCluster.getNumberOfServers()):
                     if log_data['operation'] == 'create':
-                        client.create(log_data['data'][0], log_data['data'][1], currentServer)
+                        client.create(log_data['data'][0], log_data['data'][1], serversCluster.getNextServer())
                     elif log_data['operation'] == 'update':
-                        client.update(log_data['data'][0], log_data['data'][1], currentServer)
+                        client.update(log_data['data'][0], log_data['data'][1], serversCluster.getNextServer())
                     elif log_data['operation'] == 'delete':
-                        client.delete(log_data['data'], currentServer)
+                        client.delete(log_data['data'], serversCluster.getNextServer())
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     def __init__(self, server, handler, serversCluster):
