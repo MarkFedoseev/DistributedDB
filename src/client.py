@@ -5,14 +5,38 @@ import argparse
 class Client:
     def __init__(self, serverAddress):
         self.server = serverAddress
-    def create(self, key, value):
-        return requests.post(self.server, json={"key": key, "value": value})
-    def read(self, key):
-        return requests.get(self.server + "?key=" + key)
-    def update(self, key, value):
-        return requests.put(self.server, json={"key": key, "value": value})
-    def delete(self, key):
-        return requests.delete(self.server + "?key=" + key)
+
+    def create(self, key, value, serverAddress = None):
+        if not serverAddress:
+            return requests.post(self.server, json={"key": key, "value": value})
+        else:
+            return requests.post(serverAddress, json={"key": key, "value": value})
+        
+    def read(self, key, serverAddress = None):
+        response = None
+        if not serverAddress:
+            #print(f'sending to: {self.server}')
+            response = requests.get(self.server + "?key=" + key, allow_redirects=False)
+        else:
+            #print(f'sending to: {serverAddress}')
+            response = requests.get(serverAddress + "?key=" + key, allow_redirects=False)
+        #print(F'SERVERS RESPONSE: {str(response)}')
+        if response.status_code == 302:
+            return self.read(key, response.headers['Location'])
+        else:
+            return response
+        
+    def update(self, key, value, serverAddress = None):
+        if not serverAddress:
+            return requests.put(self.server, json={"key": key, "value": value})
+        else:
+            return requests.put(serverAddress, json={"key": key, "value": value})
+        
+    def delete(self, key, serverAddress = None):
+        if not serverAddress:
+            return requests.delete(self.server + "?key=" + key)
+        else:
+            return requests.delete(serverAddress + "?key=" + key)
 
 if __name__ == '__main__':
 
@@ -51,6 +75,6 @@ if __name__ == '__main__':
     elif args.operation.lower() == 'delete':
         response = client.delete(args.key)
         print(response.json())
-        
+
     else:
         print("Error: Invalid operation. Valid operations are create, read, update, delete.")
