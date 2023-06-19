@@ -44,7 +44,7 @@ class ServersCluster():
         with self.lock:
             return self.isMasterFlag
         
-    def setMaster(self, flag):
+    def setMasterFlag(self, flag):
         with self.lock:
             self.isMasterFlag = flag
 
@@ -103,12 +103,6 @@ class ServerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
 
         if self.path == "/isAlive":
-            print('mzalupa')
-            self.send_response(200)
-            self.end_headers()
-            return
-        if self.path == "/isAliver":
-            print('zalupa')
             self.send_response(200)
             self.end_headers()
             return
@@ -140,19 +134,19 @@ class ServerHandler(BaseHTTPRequestHandler):
         data = json.loads(post_data.decode())
 
         if data.get('key') == 'yrMaster':
-                becomeMaster(self.server.masterWatcher.timestamp)
+                becomeMaster(self.server, self.server.masterWatcher.timestamp)
                 self.send_response(200)
                 self.end_headers()
                 return
         if data.get('key') == 'newMaster':
             self.server.masterWatcher.timestamp.setTime(-1)
+            print(f'newMaster is: {data.get("mastersAddress")}')
             self.server.serversCluster.setMaster(data.get('mastersAddress'))
             self.send_response(200)
             self.end_headers()
             return
 
         if data.get('key') == 'getWeight':
-                #print(f"GAY SEX ALARM: {data.get('timestamp')}")
                 if float(data.get('timestamp')) < self.server.masterWatcher.timestamp.getTime() or \
                     self.server.masterWatcher.timestamp.getTime() < 0:
 
@@ -203,21 +197,27 @@ class ServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"Error:": record.split('Error:')[1]}).encode())
 
-def becomeMaster(timestamp):
-    timestamp.setTime(-1)
+def becomeMaster(server, timestamp):
     print('Im master now')
-    serversCluster.setMaster(True)
-    serversClusterReplicate.setMaster(True)
+    server.serversCluster.setMasterFlag(True)
+    server.serversClusterReplicate.setMasterFlag(True)
     threadReplicate.start()
     threadRepWatcher.start()
-    replicas = serversCluster.getServers()
+    replicas = serversCluster.getServers().copy()
+    droped_preplicas = []
     for replica in replicas:
-        requests.post(replica, json={'key' : 'newMaster', 'address' : myURL})
+        try:
+            requests.post(replica, json={'key' : 'newMaster', 'mastersAddress' : myURL})
+        except:
+            droped_preplicas.append(replica)
+    print(F'BECOMEMASTER droped servers: {str(droped_preplicas)}')
 
-def becomeReplica():
+    timestamp.setTime(-1)
+
+def becomeReplica(server):
     print('Im replica now')
-    serversCluster.setMaster(False)
-    serversClusterReplicate.setMaster(False)
+    server.serversCluster.setMasterFlag(False)
+    server.serversClusterReplicate.setMasterFlag(False)
     threadMasWatcher.start()
 
 def replicate(server, serversCluster):
@@ -255,7 +255,8 @@ def pingReplicas(serversCluster):
     print('pinging replicas..')
     aliveReplicas = []
     #serversCluster.resetCurrentServer
-    replicas = serversCluster.getServers()
+    replicas = serversCluster.getServers().copy()
+    print(replicas)
     droped_replicas = []
     for replica in replicas:
         try:
@@ -284,17 +285,17 @@ class MasterWatcherTimeStamp:
 #master drop
 class MasterWatcher:
     def __init__(self, serversCluster, mwTimestamp):
-        self.mastersAddress = serversCluster.getMaster()
         self.serversCluster = serversCluster
         self.timestamp = mwTimestamp
     def watch(self):
         while True:
             print('pinging master..')
+            print(f'CURRENT MASTER IS: {self.serversCluster.getMaster()}')
             if self.serversCluster.isMaster == True:
                 return
             time.sleep(3)
             newMaster = None
-            if self.pingMaster(self.mastersAddress):
+            if self.pingMaster(self.serversCluster.getMaster()):
                 print('master is dead')
                 self.timestamp.setTime(time.time())
                 newMaster = self.chooseNewMaster(
@@ -310,7 +311,7 @@ class MasterWatcher:
 
     def pingMaster(self, mastersAddress):
         try:
-            return requests.get(mastersAddress + '/isAliver').status_code != 200
+            return requests.get(mastersAddress + '/isAlive').status_code != 200
         except:
             return True
     def getWeights(self, aliveReplicas):
@@ -320,7 +321,6 @@ class MasterWatcher:
             if response.status_code == 204:
                 return
             else:
-                print(f'GAY SEX ALARM: {response.json()}')
                 weights.update({replica : response.json()[replica]})
         return weights
     def chooseNewMaster(self, weights):
@@ -333,8 +333,9 @@ def ReplicasWatcher(serversCluster):
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    def __init__(self, server, handler, serversCluster, masterWatcher, myURL):
+    def __init__(self, server, handler, serversCluster, serversClusterReplicate, masterWatcher, myURL):
         self.serversCluster = serversCluster
+        self.serversClusterReplicate = serversClusterReplicate
         self.log_lock = threading.Lock()
         self.masterWatcher = masterWatcher
         self.myURL = myURL
@@ -356,10 +357,9 @@ if __name__ == '__main__':
 
     serversCluster = ServersCluster(mastersAddress, serversCfg.copy(), args.master)
     serversClusterReplicate = ServersCluster(mastersAddress, serversCfg.copy(), args.master)
-
     masterWatcher = MasterWatcher(serversCluster, MasterWatcherTimeStamp())
 
-    server = ThreadedHTTPServer((args.host, int(args.port)), ServerHandler, serversCluster, masterWatcher, myURL)
+    server = ThreadedHTTPServer((args.host, int(args.port)), ServerHandler, serversCluster, serversClusterReplicate, masterWatcher, myURL)
 
     threadReplicate = threading.Thread(target=replicate, args=(server, serversClusterReplicate,))
     threadRepWatcher = threading.Thread(target=ReplicasWatcher, args=(serversCluster, ))
