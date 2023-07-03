@@ -20,14 +20,15 @@ def parseServersCfg(path):
         for server in jsn:
             ip, port = list(server.items())[0]
             servers.append(f'http://{str(ip)}:{str(port)}')
-        #print(servers)
-        #servers = [str(server.).join(':', port) for ip, port in jsn.items()]
     return servers
 
 class ServersCluster():
-    def __init__(self, mastersAddress, servers = [], isMaster = False):
+    def __init__(self, mastersAddress, myURL, servers = [], isMaster = False):
         self.isMasterFlag = isMaster
         self.master = mastersAddress
+        self.myURL = myURL
+        if myURL in servers:
+            servers.remove(myURL)
         self.servers = servers
         self.curent_server = iter(self.servers)
         self.lock = threading.Lock()
@@ -75,12 +76,12 @@ class ServersCluster():
         with self.lock:
             try:
                 serv = next(self.curent_server)
-                #print(f'redirecting to: {str(serv)}')
+                if serv == self.myURL:
+                    return self.getNextServer()
                 return serv
             except StopIteration:
                 self.resetCurrentServer()
-                serv = next(self.curent_server)
-                #print(f'redirecting to: {str(serv)}')
+                serv = self.getNextServer()
                 return serv
 
         
@@ -94,7 +95,6 @@ class ServerHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({key: record}).encode())
 
     def writeLog(self, req):
-        #print('writing log...')
         with server.log_lock:
             with open('requests.log', 'a') as log_file:
                 log_file.write(json.dumps(req) + '\n')
@@ -106,14 +106,17 @@ class ServerHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             return
-
+        print(self.server.serversCluster.isMaster())
         if self.server.serversCluster.isMaster():
+            newLocation = self.server.serversCluster.getNextServer()
+            print(f'302 Location: {newLocation}')
             self.send_response(302)
-            self.send_header('Location', self.server.serversCluster.getNextServer())
+            self.send_header('Location', newLocation)
             self.end_headers()
             return
         
         parsed_path = urlparse.urlparse(self.path)
+        print(f'Got request for: {parsed_path}')
         key = parse_qs(parsed_path.query).get('key', None)
         if key:
             record = db.read(key[0])
@@ -254,7 +257,6 @@ def getWeight(serversCluster):
 def pingReplicas(serversCluster):
     print('pinging replicas..')
     aliveReplicas = []
-    #serversCluster.resetCurrentServer
     replicas = serversCluster.getServers().copy()
     print(replicas)
     droped_replicas = []
@@ -291,10 +293,12 @@ class MasterWatcher:
         while True:
             print('pinging master..')
             print(f'CURRENT MASTER IS: {self.serversCluster.getMaster()}')
-            if self.serversCluster.isMaster == True:
+            if self.serversCluster.isMaster() == True:
+                print('stopMasterWatch')
                 return
             time.sleep(3)
             newMaster = None
+            oldMaster = self.serversCluster.getMaster()
             if self.pingMaster(self.serversCluster.getMaster()):
                 print('master is dead')
                 self.timestamp.setTime(time.time())
@@ -304,8 +308,11 @@ class MasterWatcher:
                     )
                 )
             if newMaster:
-                requests.post(newMaster, json={'key' : 'yrMaster'})
-                self.serversCluster.setMaster(newMaster)
+                if not (oldMaster != self.serversCluster.getMaster() or self.serversCluster.isMaster()):
+                    requests.post(newMaster, json={'key' : 'yrMaster'})
+                    self.serversCluster.setMaster(newMaster)
+                else:
+                    print('New Master already set')
             else:
                 print('master is alive')
 
@@ -352,11 +359,9 @@ if __name__ == '__main__':
     time.sleep(3)
     mastersAddress =  args.mastersAddress if not args.master else None
     serversCfg = parseServersCfg('replicas.json')
-    if myURL in serversCfg:
-        serversCfg.remove(myURL)
 
-    serversCluster = ServersCluster(mastersAddress, serversCfg.copy(), args.master)
-    serversClusterReplicate = ServersCluster(mastersAddress, serversCfg.copy(), args.master)
+    serversCluster = ServersCluster(mastersAddress, myURL, serversCfg.copy(), args.master)
+    serversClusterReplicate = ServersCluster(mastersAddress, myURL, serversCfg.copy(), args.master)
     masterWatcher = MasterWatcher(serversCluster, MasterWatcherTimeStamp())
 
     server = ThreadedHTTPServer((args.host, int(args.port)), ServerHandler, serversCluster, serversClusterReplicate, masterWatcher, myURL)
@@ -372,6 +377,5 @@ if __name__ == '__main__':
     else:
         print('Starting as replica')
         threadMasWatcher.start()
-    #server = HTTPServer(('localhost', 8080), ServerHandler)
     print(f'Starting server at {myURL}')
     server.serve_forever()

@@ -15,13 +15,11 @@ class Client:
     def read(self, key, serverAddress = None):
         response = None
         if not serverAddress:
-            #print(f'sending to: {self.server}')
             response = requests.get(self.server + "?key=" + key, allow_redirects=False)
         else:
-            #print(f'sending to: {serverAddress}')
             response = requests.get(serverAddress + "?key=" + key, allow_redirects=False)
-        #print(F'SERVERS RESPONSE: {str(response)}')
         if response.status_code == 302:
+            print('got 302')
             return self.read(key, response.headers['Location'])
         else:
             return response
